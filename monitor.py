@@ -1,8 +1,9 @@
 """
 期刊状态监控主程序
-负责登录IEEE和Elsevier，获取稿件状态
+负责登录IEEE和Elsevier，获取稿件状态，并根据时间发送每日报告或变化通知
 """
 import time
+import os
 from typing import List, Dict, Optional
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -50,12 +51,7 @@ class JournalMonitor:
             print("🔒 浏览器已关闭")
     
     def fetch_ieee_manuscripts(self) -> List[Dict]:
-        """
-        获取IEEE稿件列表
-        
-        Returns:
-            稿件列表
-        """
+        """获取IEEE稿件列表"""
         if not self.config.IEEE_EMAIL or not self.config.IEEE_PASSWORD:
             print("⚠️  未配置IEEE账户，跳过")
             return []
@@ -114,22 +110,18 @@ class JournalMonitor:
                 # 点击登录按钮
                 login_button = None
                 try:
-                    # 方式1：通过按钮文本查找
                     login_button = self.driver.find_element(By.XPATH, "//button[contains(text(), 'Log In')]")
                     print("✅ 通过按钮文本找到登录按钮")
                 except:
                     try:
-                        # 方式2：通过input value查找
                         login_button = self.driver.find_element(By.XPATH, "//input[@value='Log In']")
                         print("✅ 通过input value找到登录按钮")
                     except:
                         try:
-                            # 方式3：通过name属性查找
                             login_button = self.driver.find_element(By.NAME, "login")
                             print("✅ 通过name属性找到登录按钮")
                         except:
                             try:
-                                # 方式4：查找所有button和input，然后过滤
                                 buttons = self.driver.find_elements(By.XPATH, "//button | //input[@type='submit'] | //input[@type='button']")
                                 for btn in buttons:
                                     btn_text = btn.text or btn.get_attribute('value') or ''
@@ -140,9 +132,8 @@ class JournalMonitor:
                                 if not login_button:
                                     raise Exception("未找到登录按钮")
                             except:
-                                # 方式5：直接按Enter键
                                 print("⚠️  未找到登录按钮，尝试按Enter键")
-                                password_input.send_keys("\n")  # 按Enter键
+                                password_input.send_keys("\n")
                                 login_button = None
                 
                 if login_button:
@@ -158,7 +149,7 @@ class JournalMonitor:
                 raise
             
             print("⏳ 等待登录...")
-            time.sleep(3)
+            time.sleep(5)
             
             # 检查是否登录成功
             if "ScholarOne" in self.driver.title or "Manuscripts" in self.driver.title:
@@ -171,15 +162,14 @@ class JournalMonitor:
                         EC.element_to_be_clickable((By.LINK_TEXT, "Author"))
                     )
                     author_button.click()
-                    time.sleep(3)
+                    time.sleep(5)
                     print("✅ 已进入作者仪表板")
                 except Exception as e:
                     print(f"⚠️  未找到Author按钮，尝试其他方式: {e}")
-                    # 尝试通过其他方式查找Author链接
                     try:
                         author_link = self.driver.find_element(By.XPATH, "//a[contains(text(), 'Author') or contains(@href, 'author')]")
                         author_link.click()
-                        time.sleep(3)
+                        time.sleep(5)
                     except:
                         print("⚠️  无法找到Author入口，尝试直接查找稿件")
                 
@@ -188,318 +178,139 @@ class JournalMonitor:
                 time.sleep(2)
                 
                 try:
-                    # 根据截图，稿件表格的列顺序是：STATUS, ID, TITLE, CREATED, SUBMITTED
-                    manuscript_rows = []
-                    
-                    # 方式1：查找带有data属性的表格行
+                    # 查找表格行
                     manuscript_rows = self.driver.find_elements(By.XPATH, "//table//tr[@class='data' or @class='data-even' or @class='data-odd']")
-                    
                     if not manuscript_rows:
-                        # 方式2：查找包含manuscript的表格行
                         manuscript_rows = self.driver.find_elements(By.XPATH, "//table//tr[contains(@class, 'manuscript')]")
-                    
                     if not manuscript_rows:
-                        # 方式3：查找包含稿件信息的所有表格行（排除表头）
                         all_rows = self.driver.find_elements(By.XPATH, "//table//tr[td]")
-                        # 过滤掉表头行
-                        manuscript_rows = [row for row in all_rows if len(row.find_elements(By.TAG_NAME, "td")) >= 3]
+                        manuscript_rows = [row for row in all_rows if len(row.find_elements(By.TAG_NAME, "td")) >= 5]
                     
                     print(f"📄 找到 {len(manuscript_rows)} 行数据")
-                    
-                    if len(manuscript_rows) == 0:
-                        print("⚠️  未找到稿件列表，可能需要调整XPath")
-                        print("📝 当前页面标题:", self.driver.title)
-                        print("🔗 当前页面URL:", self.driver.current_url)
                     
                     for idx, row in enumerate(manuscript_rows):
                         try:
                             cells = row.find_elements(By.TAG_NAME, "td")
-                            print(f"  行 {idx+1}: 找到 {len(cells)} 列")
-                            
-                            # 输出每一列的HTML结构（前100个字符）
-                            for i, cell in enumerate(cells[:5]):  # 只输出前5列
-                                cell_html = cell.get_attribute('innerHTML')[:100] if cell.get_attribute('innerHTML') else ''
-                                print(f"    列{i}: HTML=[{cell_html}...]")
-                            
-                            if len(cells) < 5:  # 需要至少5列才能提取STATUS, ID, TITLE
-                                print(f"    跳过：列数不足（需要至少5列）")
+                            if len(cells) < 5:
                                 continue
                             
-                            # 根据实际HTML结构，列顺序是：列0(复杂结构), 列1(图标), 列2(STATUS), 列3(ID), 列4(TITLE)
-                            # STATUS在第2列
-                            status_cell = cells[2] if len(cells) > 2 else None
+                            # 提取状态 (列2)
+                            status_cell = cells[2]
                             status = "未知状态"
-                            if status_cell:
-                                # 尝试查找状态按钮或链接
-                                status_elements = status_cell.find_elements(By.XPATH, ".//a | .//button | .//span")
-                                if status_elements:
-                                    # 获取最后一个元素的文本（通常是状态）
-                                    for elem in status_elements:
-                                        elem_text = elem.text.strip()
-                                        if elem_text and elem_text not in ['Contact Journal', 'EIC:', 'ADM:']:
-                                            status = elem_text
-                                else:
-                                    status = status_cell.text.strip()
-                                    # 如果包含多行，取最后一行
-                                    if '\n' in status:
-                                        lines = [l.strip() for l in status.split('\n') if l.strip()]
-                                        status = lines[-1] if lines else "未知状态"
+                            status_elements = status_cell.find_elements(By.XPATH, ".//a | .//button | .//span")
+                            if status_elements:
+                                for elem in status_elements:
+                                    elem_text = elem.text.strip()
+                                    if elem_text and elem_text not in ['Contact Journal', 'EIC:', 'ADM:']:
+                                        status = elem_text
+                            else:
+                                status = status_cell.text.strip()
                             
-                            # ID在第3列
-                            manuscript_id = ""
-                            if len(cells) > 3:
-                                id_cell = cells[3]
-                                # 尝试查找id_cell中的所有文本
-                                manuscript_id = id_cell.text.strip()
-                                # 如果为空，尝试查找子元素
-                                if not manuscript_id:
-                                    id_elements = id_cell.find_elements(By.XPATH, ".//*")
-                                    for elem in id_elements:
-                                        elem_text = elem.text.strip()
-                                        if elem_text:
-                                            manuscript_id = elem_text
-                                            break
+                            # 提取ID (列3)
+                            id_cell = cells[3]
+                            manuscript_id = id_cell.text.strip()
+                            if not manuscript_id:
+                                id_elements = id_cell.find_elements(By.XPATH, ".//*")
+                                for elem in id_elements:
+                                    if elem.text.strip():
+                                        manuscript_id = elem.text.strip()
+                                        break
                             
-                            # TITLE在第4列
-                            title = ""
-                            if len(cells) > 4:
-                                title_cell = cells[4]
-                                # 尝试查找title_cell中的所有文本
-                                title = title_cell.text.strip()
-                                # 如果为空，尝试查找链接或其他元素
-                                if not title:
-                                    title_elements = title_cell.find_elements(By.XPATH, ".//a | .//span | .//div")
-                                    for elem in title_elements:
-                                        elem_text = elem.text.strip()
-                                        if elem_text and len(elem_text) > 5:  # 过滤掉太短的文本
-                                            title = elem_text
-                                            break
+                            # 提取标题 (列4)
+                            title_cell = cells[4]
+                            title = title_cell.text.strip()
+                            if not title:
+                                title_elements = title_cell.find_elements(By.XPATH, ".//a | .//span | .//div")
+                                for elem in title_elements:
+                                    if len(elem.text.strip()) > 5:
+                                        title = elem.text.strip()
+                                        break
                             
-                            print(f"    原始数据: STATUS=[{status}], ID=[{manuscript_id}], TITLE=[{title[:50] if title else ''}]")
-                            
-                            # 过滤掉空行、表头行或非稿件行
-                            if not manuscript_id or not title:
-                                print(f"    跳过：ID或标题为空")
-                                continue
-                            if manuscript_id.lower() in ['manuscript', 'id', '#', 'status']:
-                                print(f"    跳过：表头行 (ID={manuscript_id})")
-                                continue
-                            if status.lower() in ['status', 'id', 'title']:
-                                print(f"    跳过：表头行 (STATUS={status})")
-                                continue
-                            
-                            manuscripts.append({
-                                'id': manuscript_id,
-                                'title': title,
-                                'status': status,
-                                'source': 'IEEE',
-                                'url': self.driver.current_url
-                            })
-                            
-                            print(f"  ✓ [{status}] {manuscript_id}: {title}")
+                            if manuscript_id and title:
+                                manuscripts.append({
+                                    'id': manuscript_id,
+                                    'title': title,
+                                    'status': status,
+                                    'source': 'IEEE',
+                                    'url': self.driver.current_url
+                                })
+                                print(f"  ✓ [{status}] {manuscript_id}: {title[:50]}...")
                             
                         except Exception as e:
-                            print(f"  ⚠️  解析稿件信息失败: {e}")
-                            continue
-                    
+                            print(f"  ❌ 解析行 {idx+1} 失败: {e}")
+                            
                 except Exception as e:
-                    print(f"⚠️  未找到稿件列表: {e}")
-                    print("💡 提示：可能需要根据实际页面结构调整XPath")
-                    
+                    print(f"❌ 查找稿件列表失败: {e}")
             else:
-                print("❌ IEEE登录失败，请检查账户信息")
+                print(f"❌ 登录后页面标题不匹配: {self.driver.title}")
                 
         except Exception as e:
             print(f"❌ 获取IEEE稿件失败: {e}")
-        
+            
         return manuscripts
-    
+
     def fetch_elsevier_manuscripts(self) -> List[Dict]:
-        """
-        获取Elsevier稿件列表
-        
-        Returns:
-            稿件列表
-        """
-        if not self.config.ELSEVIER_EMAIL or not self.config.ELSEVIER_PASSWORD or not self.config.ELSEVIER_URL:
-            print("⚠️  未配置Elsevier账户或期刊网址，跳过")
+        """获取Elsevier稿件列表 (预留接口)"""
+        if not self.config.ELSEVIER_EMAIL or not self.config.ELSEVIER_PASSWORD:
+            print("⚠️  未配置Elsevier账户，跳过")
             return []
         
-        print("\n" + "=" * 50)
-        print("📚 开始获取Elsevier稿件状态...")
-        print("=" * 50)
-        
-        manuscripts = []
-        
-        try:
-            # 访问Editorial Manager登录页面
-            print("🔗 访问Editorial Manager登录页面...")
-            login_url = self.config.ELSEVIER_URL
-            print(f"🎯 目标网址: {login_url}")
-            
-            self.driver.get(login_url)
-            time.sleep(2)
-            
-            # 输入用户名
-            print("📝 输入登录信息...")
-            email_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.NAME, "login"))
-            )
-            email_input.clear()
-            email_input.send_keys(self.config.ELSEVIER_EMAIL)
-            
-            # 输入密码
-            password_input = self.driver.find_element(By.NAME, "password")
-            password_input.clear()
-            password_input.send_keys(self.config.ELSEVIER_PASSWORD)
-            
-            # 点击登录按钮
-            login_button = self.driver.find_element(By.XPATH, "//input[@type='submit' and @value='Login']")
-            login_button.click()
-            
-            print("⏳ 等待登录...")
-            time.sleep(3)
-            
-            # 检查是否登录成功
-            if "Author" in self.driver.title or "Main Menu" in self.driver.title:
-                print("✅ Elsevier登录成功")
-                
-                print("🔍 正在查找稿件...")
-                
-                try:
-                    manuscript_links = self.driver.find_elements(By.XPATH, "//a[contains(text(), 'Submissions')]")
-                    
-                    for link in manuscript_links:
-                        try:
-                            link.click()
-                            time.sleep(2)
-                            
-                            manuscript_rows = self.driver.find_elements(By.XPATH, "//table//tr[contains(@class, 'data')]")
-                            
-                            print(f"📄 找到 {len(manuscript_rows)} 篇稿件")
-                            
-                            for row in manuscript_rows:
-                                try:
-                                    cells = row.find_elements(By.TAG_NAME, "td")
-                                    
-                                    if len(cells) >= 3:
-                                        manuscript_id = cells[0].text.strip()
-                                        title = cells[1].text.strip()
-                                        status = cells[2].text.strip()
-                                        
-                                        manuscripts.append({
-                                            'id': manuscript_id,
-                                            'title': title,
-                                            'status': status,
-                                            'source': 'Elsevier',
-                                            'url': self.driver.current_url
-                                        })
-                                        
-                                        print(f"  ✓ {manuscript_id}: {title} - {status}")
-                                        
-                                except Exception as e:
-                                    print(f"  ⚠️  解析稿件信息失败: {e}")
-                                    continue
-                            
-                            self.driver.back()
-                            time.sleep(1)
-                            
-                        except Exception as e:
-                            print(f"  ⚠️  处理稿件链接失败: {e}")
-                            continue
-                    
-                except Exception as e:
-                    print(f"⚠️  未找到稿件列表: {e}")
-                    print("💡 提示：可能需要根据实际页面结构调整XPath")
-                    
-            else:
-                print("❌ Elsevier登录失败，请检查账户信息")
-                
-        except Exception as e:
-            print(f"❌ 获取Elsevier稿件失败: {e}")
-        
-        return manuscripts
-    
+        # 目前主要支持IEEE，Elsevier逻辑可根据具体期刊页面进一步定制
+        print("\n⚠️  Elsevier 自动获取功能暂未完全实现，请根据具体期刊页面定制。")
+        return []
+
     def run(self):
-        """运行监控任务"""
-        print("\n" + "🚀" * 25)
-        print("期刊状态监控程序启动")
-        print("🚀" * 25 + "\n")
-        
-        # 打印配置信息
-        self.config.print_config()
-        
-        # 验证配置
-        if not self.config.validate():
-            print("\n❌ 配置验证失败，程序退出")
-            return
-        
+        """执行监控任务"""
         try:
-            # 初始化浏览器
             self._init_driver()
             
-            # 获取所有稿件
-            all_manuscripts = []
+            all_new_manuscripts = []
             
             # 获取IEEE稿件
             ieee_manuscripts = self.fetch_ieee_manuscripts()
-            all_manuscripts.extend(ieee_manuscripts)
+            all_new_manuscripts.extend(ieee_manuscripts)
             
             # 获取Elsevier稿件
             elsevier_manuscripts = self.fetch_elsevier_manuscripts()
-            all_manuscripts.extend(elsevier_manuscripts)
+            all_new_manuscripts.extend(elsevier_manuscripts)
             
-            # 关闭浏览器
-            self._close_driver()
-            
-            # 显示结果
             print("\n" + "=" * 50)
-            print(f"📊 本次共获取 {len(all_manuscripts)} 篇稿件")
+            print(f"📊 本次共获取 {len(all_new_manuscripts)} 篇稿件")
             print("=" * 50)
             
-            if all_manuscripts:
-                # 对比状态变化
-                print("\n🔍 正在对比状态变化...")
-                changed_manuscripts = self.storage.compare_and_update(all_manuscripts)
-                
-                # 判断是否为每日第一次运行（北京时间9:00）
-                from datetime import datetime
-                import os
-                current_hour = datetime.now().hour
-                is_daily_report = os.getenv('DAILY_REPORT', 'false').lower() == 'true'
-                
-                # 发送通知
-                if is_daily_report:
-                    # 每日报告模式：无论是否有变化都发送邮件
-                    print("\n📊 每日报告模式：发送所有稿件状态")
-                    self.notifier.send_daily_report(all_manuscripts)
-                    if changed_manuscripts:
-                        print(f"\n📬 检测到 {len(changed_manuscripts)} 篇稿件状态变化")
-                        for ms in changed_manuscripts:
-                            print(f"  • {ms.get('title', '未知')}: {ms.get('old_status', '未知')} → {ms.get('new_status', '未知')}")
-                else:
-                    # 普通模式：只在有变化时发送邮件
-                    if changed_manuscripts:
-                        print(f"\n📬 检测到 {len(changed_manuscripts)} 篇稿件状态变化")
-                        self.notifier.send_change_notification(changed_manuscripts)
-                    else:
-                        print("\n✅ 所有稿件状态无变化")
-            else:
-                print("\n⚠️  未获取到任何稿件，请检查账户配置或页面结构")
+            if not all_new_manuscripts:
+                print("⚠️  未获取到任何稿件，请检查账户配置或页面结构")
+                return
+
+            # 对比状态变化并保存（保存时会自动清理超过7天的旧记录）
+            print("🔍 正在对比状态变化...")
+            changed_manuscripts = self.storage.compare_and_update(all_new_manuscripts)
             
+            # 获取所有当前稿件（用于每日报告）
+            current_all_manuscripts = self.storage.get_all_manuscripts()
+            
+            # 邮件通知逻辑
+            is_daily_report = os.getenv('DAILY_REPORT', 'false').lower() == 'true'
+            
+            if is_daily_report:
+                print("📊 每日报告模式：发送所有稿件状态")
+                self.notifier.send_daily_report(current_all_manuscripts)
+            elif changed_manuscripts:
+                print(f"📬 检测到 {len(changed_manuscripts)} 篇稿件状态变化，发送通知邮件")
+                self.notifier.send_change_notification(changed_manuscripts)
+            else:
+                print("✅ 所有稿件状态无变化，无需发送邮件")
+                
             print("\n" + "✅" * 25)
             print("监控任务完成")
-            print("✅" * 25 + "\n")
+            print("✅" * 25)
             
         except Exception as e:
-            print(f"\n❌ 程序执行出错: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ 监控任务执行失败: {e}")
         finally:
-            # 确保浏览器关闭
             self._close_driver()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     monitor = JournalMonitor()
     monitor.run()

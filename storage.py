@@ -1,10 +1,10 @@
 """
 数据存储和状态对比模块
-负责保存和读取稿件状态，检测变化
+负责保存和读取稿件状态，检测变化，并定期清理旧数据
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 
@@ -36,11 +36,52 @@ class ManuscriptStorage:
     def save_manuscripts(self, manuscripts: Dict):
         """保存稿件数据"""
         try:
+            # 在保存前进行清理：删除超过 7 天未更新的稿件记录
+            cleaned_data = self._cleanup_old_records(manuscripts)
+            
             with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(manuscripts, f, ensure_ascii=False, indent=2)
+                json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
             print(f"✅ 数据已保存到 {self.data_file}")
         except Exception as e:
             print(f"❌ 保存数据失败: {e}")
+
+    def _cleanup_old_records(self, manuscripts: Dict, days: int = 7) -> Dict:
+        """
+        清理超过指定天数未更新的稿件记录
+        
+        Args:
+            manuscripts: 稿件数据字典
+            days: 保留的天数，默认 7 天
+            
+        Returns:
+            清理后的稿件数据字典
+        """
+        cleaned_data = {}
+        now = datetime.now()
+        threshold = now - timedelta(days=days)
+        
+        removed_count = 0
+        for key, data in manuscripts.items():
+            last_checked_str = data.get('last_checked')
+            if not last_checked_str:
+                cleaned_data[key] = data
+                continue
+                
+            try:
+                last_checked = datetime.strptime(last_checked_str, '%Y-%m-%d %H:%M:%S')
+                if last_checked >= threshold:
+                    cleaned_data[key] = data
+                else:
+                    removed_count += 1
+                    print(f"🗑️  清理过期记录: {data.get('title', '未知标题')} (最后更新: {last_checked_str})")
+            except ValueError:
+                # 如果日期格式不对，保留数据以防误删
+                cleaned_data[key] = data
+        
+        if removed_count > 0:
+            print(f"🧹 共清理了 {removed_count} 条超过 {days} 天未更新的记录")
+            
+        return cleaned_data
     
     def compare_and_update(self, new_manuscripts: List[Dict]) -> List[Dict]:
         """
@@ -54,7 +95,7 @@ class ManuscriptStorage:
         """
         old_data = self.load_manuscripts()
         changed_manuscripts = []
-        updated_data = {}
+        updated_data = old_data.copy() # 保留旧数据，以便进行增量更新和清理
         
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
@@ -99,7 +140,7 @@ class ManuscriptStorage:
                 'first_seen': old_data.get(key, {}).get('first_seen', current_time)
             }
         
-        # 保存更新后的数据
+        # 保存更新后的数据（save_manuscripts 内部会调用 _cleanup_old_records）
         self.save_manuscripts(updated_data)
         
         return changed_manuscripts
