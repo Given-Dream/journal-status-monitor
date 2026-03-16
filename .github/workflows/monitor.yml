@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write # 添加 actions 权限以允许清理工作流运行
+      actions: write # 必须开启 actions 写权限才能删除运行记录
     
     steps:
       - name: 检出代码
@@ -111,11 +111,9 @@ jobs:
           fi
 
       - name: 清理旧的工作流运行记录
-        uses: Mattraiano/delete-workflow-runs@v5
+        uses: Mattraiano/delete-workflow-runs@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          retain_days: 7
-          keep_minimum_runs: 7
-          delete_workflow_pattern: Journal Status Monitor
-          dry_run: false
+          retain_days: 0 # 不按天数保留，只按次数保留
+          keep_minimum_runs: 7 # 仅保留最近的 7 次运行
