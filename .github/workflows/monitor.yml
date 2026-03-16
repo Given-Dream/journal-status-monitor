@@ -111,9 +111,25 @@ jobs:
           fi
 
       - name: 清理旧的工作流运行记录
-        uses: Mattraiano/delete-workflow-runs@v2
+        if: always()
+        uses: actions/github-script@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          retain_days: 0 # 不按天数保留，只按次数保留
-          keep_minimum_runs: 7 # 仅保留最近的 7 次运行
+          script: |
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'monitor.yml', // 确保这里对应您的 workflow 文件名
+              per_page: 100
+            });
+            
+            // 保留最近的 7 次运行，删除其余的
+            const runsToDelete = runs.data.workflow_runs.slice(7);
+            
+            for (const run of runsToDelete) {
+              await github.rest.actions.deleteWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+              console.log(`Deleted run ID: ${run.id}`);
+            }
