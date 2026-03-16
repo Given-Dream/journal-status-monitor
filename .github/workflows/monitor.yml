@@ -2,11 +2,11 @@ name: 期刊状态监控
 
 on:
   schedule:
-    # 北京时间 9:00 - 每日报告（UTC 1:00）
+    # 每天北京时间 9:00 (UTC 1:00) - 发送每日报告
     - cron: '0 1 * * *'
-    # 北京时间 13:00 - 只在有变化时通知（UTC 5:00）
+    # 每天北京时间 13:00 (UTC 5:00) - 仅在状态变化时发送通知
     - cron: '0 5 * * *'
-    # 北京时间 22:00 - 只在有变化时通知（UTC 14:00）
+    # 每天北京时间 22:00 (UTC 14:00) - 仅在状态变化时发送通知
     - cron: '0 14 * * *'
   
   workflow_dispatch:
@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write # 添加 actions 权限以允许清理工作流运行
     
     steps:
       - name: 检出代码
@@ -108,3 +109,13 @@ jobs:
             git push
             echo "✅ 数据文件已更新"
           fi
+
+      - name: 清理旧的工作流运行记录
+        uses: Mattraiano/delete-workflow-runs@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          retain_days: 7
+          keep_minimum_runs: 7
+          delete_workflow_pattern: Journal Status Monitor
+          dry_run: false
