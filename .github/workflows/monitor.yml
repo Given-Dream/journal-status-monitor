@@ -101,7 +101,7 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add data/manuscripts.json || true
+          git add data/manuscripts.json data/*.txt || true
           if git diff --staged --quiet; then
             echo "ℹ️  数据文件无变化"
           else
