@@ -31,83 +31,60 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 获取完整历史以支持清理逻辑
       
       - name: 设置 Python 环境
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
       
       - name: 安装依赖
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: 创建必要目录
-        run: |
-          mkdir -p data logs
+          python -m pip install --upgrade pip
+          pip install selenium webdriver-manager
       
       - name: 执行监控任务
         env:
           IEEE_EMAIL: ${{ secrets.IEEE_EMAIL }}
           IEEE_PASSWORD: ${{ secrets.IEEE_PASSWORD }}
-          IEEE_URL: ${{ secrets.IEEE_URL }}
           ELSEVIER_EMAIL: ${{ secrets.ELSEVIER_EMAIL }}
           ELSEVIER_PASSWORD: ${{ secrets.ELSEVIER_PASSWORD }}
-          ELSEVIER_URL: ${{ secrets.ELSEVIER_URL }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          LOG_LEVEL: INFO
-          DATA_FILE: data/manuscripts.json
-          HEADLESS: true
         run: |
-          MODE="${{ github.event.inputs.mode || 'normal' }}"
-          
-          # 使用UTC时间判断，更可靠
-          CURRENT_UTC_HOUR=$(date -u '+%H')
-          
-          echo "=========================================="
-          echo "运行模式: $MODE"
-          echo "UTC时间: $(date -u '+%Y-%m-%d %H:%M:%S')"
-          echo "北京时间: $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
-          echo "当前UTC小时: $CURRENT_UTC_HOUR"
-          echo "=========================================="
-          
-          if [ "$MODE" = "test" ]; then
-            echo "🧪 测试模式：发送测试邮件"
-            python -c "from notification import EmailNotifier; EmailNotifier().send_test_email()"
-          elif [ "$MODE" = "daily_report" ]; then
-            echo "📊 每日报告模式：无论是否有变化都发送邮件"
-            export DAILY_REPORT=true
-            python monitor.py
-          else
-            echo "🚀 正常模式：执行监控任务"
-            # UTC 1:00 = 北京时间 9:00（每日报告时间）
-            if [ "$CURRENT_UTC_HOUR" = "01" ]; then
-              echo "📊 每日报告时间：发送所有稿件状态"
+          # 根据触发方式设置运行模式
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.mode }}" = "daily_report" ]; then
               export DAILY_REPORT=true
             else
-              echo "🔍 普通监控：只在状态变化时发送邮件"
               export DAILY_REPORT=false
             fi
             python monitor.py
+          elif [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
+            echo "📊 定时任务：发送每日报告"
+            export DAILY_REPORT=true
+            python monitor.py
+          else
+            echo "🔍 定时任务：只在状态变化时发送邮件"
+            export DAILY_REPORT=false
+            python monitor.py
           fi
       
-      - name: 提交数据文件变化
+      - name: 提交数据和时间线文件
         if: always()
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add data/manuscripts.json data/*.txt || true
+          mkdir -p data
+          git add data/manuscripts.json data/timeline_*.txt || true
           if git diff --staged --quiet; then
-            echo "ℹ️  数据文件无变化"
+            echo "ℹ️ 数据无变化"
           else
-            git commit -m "Update manuscript status data [skip ci]"
+            git commit -m "Update manuscript data and timelines [skip ci]"
             git push
-            echo "✅ 数据文件已更新"
+            echo "✅ 数据已同步到仓库"
           fi
 
       - name: 清理旧的工作流运行记录
@@ -118,7 +95,7 @@ jobs:
             const runs = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: 'monitor.yml', // 确保这里对应您的 workflow 文件名
+              workflow_id: 'monitor.yml',
               per_page: 100
             });
             
