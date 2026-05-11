@@ -1,93 +1,108 @@
-name: 期刊状态监控
+name: Journal Status Monitor
 
 on:
   schedule:
-    # 每天北京时间 9:00 (UTC 1:00) - 发送每日报告
     - cron: '0 1 * * *'
-    # 每天北京时间 13:00 (UTC 5:00) - 仅在状态变化时发送通知
     - cron: '0 5 * * *'
-    # 每天北京时间 22:00 (UTC 14:00) - 仅在状态变化时发送通知
     - cron: '0 14 * * *'
-  
   workflow_dispatch:
     inputs:
       mode:
-        description: '运行模式'
+        description: Run mode
         required: true
-        default: 'normal'
+        default: normal
         type: choice
         options:
           - normal
           - test
           - daily_report
 
+concurrency:
+  group: journal-status-monitor
+  cancel-in-progress: false
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: write # 必须开启 actions 写权限才能删除运行记录
-    
+      actions: write
+
     steps:
-      - name: 检出代码
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 获取完整历史以支持清理逻辑
-      
-      - name: 设置 Python 环境
+          fetch-depth: 0
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
-      - name: 安装依赖
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium webdriver-manager
-      
-      - name: 执行监控任务
+          pip install -r requirements.txt
+
+      - name: Resolve run mode
+        id: mode
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
+            echo "mode=daily_report" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=normal" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run monitor
         env:
           IEEE_EMAIL: ${{ secrets.IEEE_EMAIL }}
           IEEE_PASSWORD: ${{ secrets.IEEE_PASSWORD }}
+          IEEE_URL: ${{ secrets.IEEE_URL }}
           ELSEVIER_EMAIL: ${{ secrets.ELSEVIER_EMAIL }}
           ELSEVIER_PASSWORD: ${{ secrets.ELSEVIER_PASSWORD }}
+          ELSEVIER_URL: ${{ secrets.ELSEVIER_URL }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
-        run: |
-          # 根据触发方式设置运行模式
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ github.event.inputs.mode }}" = "daily_report" ]; then
-              export DAILY_REPORT=true
-            else
-              export DAILY_REPORT=false
-            fi
-            python monitor.py
-          elif [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
-            echo "📊 定时任务：发送每日报告"
-            export DAILY_REPORT=true
-            python monitor.py
-          else
-            echo "🔍 定时任务：只在状态变化时发送邮件"
-            export DAILY_REPORT=false
-            python monitor.py
-          fi
-      
-      - name: 提交数据和时间线文件
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          DATA_FILE: data/manuscripts.json
+          HEADLESS: 'true'
+          SAVE_DEBUG_ARTIFACTS: 'true'
+          FAIL_ON_EMPTY: 'false'
+        run: python monitor.py --mode "${{ steps.mode.outputs.mode }}"
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-debug
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Commit data changes
         if: always()
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           mkdir -p data
-          git add data/manuscripts.json data/timeline_*.txt || true
+          git add data/manuscripts.json || true
           if git diff --staged --quiet; then
-            echo "ℹ️ 数据无变化"
+            echo "No data changes."
           else
-            git commit -m "Update manuscript data and timelines [skip ci]"
+            git commit -m "Update manuscript data [skip ci]"
             git push
-            echo "✅ 数据已同步到仓库"
           fi
 
-      - name: 清理旧的工作流运行记录
+      - name: Delete old workflow runs
         if: always()
         uses: actions/github-script@v7
         with:
@@ -98,15 +113,10 @@ jobs:
               workflow_id: 'monitor.yml',
               per_page: 100
             });
-            
-            // 保留最近的 7 次运行，删除其余的
-            const runsToDelete = runs.data.workflow_runs.slice(7);
-            
-            for (const run of runsToDelete) {
+            for (const run of runs.data.workflow_runs.slice(20)) {
               await github.rest.actions.deleteWorkflowRun({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 run_id: run.id
               });
-              console.log(`Deleted run ID: ${run.id}`);
             }
