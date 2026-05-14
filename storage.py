@@ -57,13 +57,16 @@ class ManuscriptStorage:
         cleaned = {}
         removed = 0
         for key, data in manuscripts.items():
+            if data.get("archived"):
+                cleaned[key] = data
+                continue
             last_checked = self._parse_time(data.get("last_checked"))
             if last_checked is None or last_checked >= threshold:
                 cleaned[key] = data
             else:
                 removed += 1
         if removed:
-            print(f"Removed {removed} stale manuscript record(s).")
+            print(f"Removed {removed} stale active manuscript record(s).")
         return cleaned
 
     @staticmethod
@@ -82,10 +85,24 @@ class ManuscriptStorage:
         seen_keys = set()
         for manuscript in new_manuscripts:
             key = self._key(manuscript)
+            if key in seen_keys:
+                continue
             seen_keys.add(key)
+
             current_status = str(manuscript.get("status", "Unknown")).strip() or "Unknown"
             title = str(manuscript.get("title", "Untitled")).strip() or "Untitled"
             old_record = old_data.get(key)
+            old_archived = bool(old_record and old_record.get("archived"))
+            now_terminal = Config.is_terminal_status(current_status)
+
+            if old_archived:
+                # Terminal articles are intentionally ignored after archival.
+                updated_data[key] = {
+                    **old_record,
+                    "last_seen_status": current_status,
+                    "last_checked": current_time,
+                }
+                continue
 
             if old_record:
                 old_status = old_record.get("status")
@@ -105,7 +122,7 @@ class ManuscriptStorage:
             else:
                 print(f"New manuscript recorded: {title} ({current_status})")
 
-            updated_data[key] = {
+            record = {
                 "id": manuscript.get("id", ""),
                 "title": title,
                 "status": current_status,
@@ -113,14 +130,23 @@ class ManuscriptStorage:
                 "url": manuscript.get("url", ""),
                 "last_checked": current_time,
                 "first_seen": old_record.get("first_seen", current_time) if old_record else current_time,
+                "archived": now_terminal,
             }
+            if now_terminal:
+                record["archived_at"] = old_record.get("archived_at", current_time) if old_record else current_time
+                record["archive_reason"] = "terminal_status"
+                print(f"Archived terminal manuscript: {title} ({current_status})")
+            updated_data[key] = record
 
         self.save_manuscripts(updated_data)
         print(f"Processed {len(seen_keys)} manuscript key(s).")
         return changed
 
-    def get_all_manuscripts(self) -> List[Dict]:
-        return list(self.load_manuscripts().values())
+    def get_all_manuscripts(self, include_archived: bool = False) -> List[Dict]:
+        records = list(self.load_manuscripts().values())
+        if include_archived:
+            return records
+        return [record for record in records if not record.get("archived")]
 
     def clear_data(self) -> None:
         if os.path.exists(self.data_file):
