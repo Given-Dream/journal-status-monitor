@@ -40,6 +40,12 @@ def split_recipients(value: str | None) -> list[str]:
     return [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
 
 
+def split_statuses(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip().lower() for item in value.replace(";", ",").split(",") if item.strip()]
+
+
 @dataclass(frozen=True)
 class PlatformAccount:
     name: str
@@ -84,6 +90,18 @@ class Config:
     DEBUG_DIR = first_env("DEBUG_DIR", default="debug") or "debug"
     WAIT_SECONDS = int_env("WAIT_SECONDS", 20)
     PAGE_LOAD_TIMEOUT = int_env("PAGE_LOAD_TIMEOUT", 60)
+
+    ARCHIVE_TERMINAL = bool_env("ARCHIVE_TERMINAL", True)
+    INCLUDE_ARCHIVED_IN_REPORT = bool_env("INCLUDE_ARCHIVED_IN_REPORT", False)
+    TERMINAL_STATUS_KEYWORDS = split_statuses(
+        first_env(
+            "TERMINAL_STATUS_KEYWORDS",
+            default=(
+                "accept,accepted,acceptance,published,online,final decision,"
+                "reject,rejected,declined,withdrawn,transferred,completed"
+            ),
+        )
+    )
 
     @classmethod
     def ieee_account(cls) -> PlatformAccount:
@@ -133,6 +151,15 @@ class Config:
         return 587
 
     @classmethod
+    def is_terminal_status(cls, status: object) -> bool:
+        if not cls.ARCHIVE_TERMINAL:
+            return False
+        text = str(status or "").strip().lower()
+        if not text:
+            return False
+        return any(keyword in text for keyword in cls.TERMINAL_STATUS_KEYWORDS)
+
+    @classmethod
     def validate(cls, mode: str) -> None:
         errors: list[str] = []
 
@@ -164,4 +191,7 @@ class Config:
     def summary(cls, accounts: Iterable[PlatformAccount]) -> str:
         names = ", ".join(account.name for account in accounts) or "none"
         smtp_host, smtp_port = cls.get_smtp_config()
-        return f"platforms={names}; smtp={smtp_host}:{smtp_port}; data_file={cls.DATA_FILE}"
+        return (
+            f"platforms={names}; smtp={smtp_host}:{smtp_port}; data_file={cls.DATA_FILE}; "
+            f"archive_terminal={cls.ARCHIVE_TERMINAL}"
+        )
