@@ -8,7 +8,9 @@ Python + GitHub Actions tool for monitoring manuscript statuses in journal submi
 - Generic Elsevier Editorial Manager login and table parsing support.
 - Manual run modes: `normal`, `test`, and `daily_report`.
 - Email notification with SMTP auto-detection for common providers.
+- Multiple recipients through comma-separated `EMAIL_RECEIVER`.
 - Persistent status comparison in `data/manuscripts.json`.
+- Terminal-status archival so accepted/published/rejected manuscripts stop appearing in normal monitoring and reports.
 - Debug screenshots/HTML generation when parsing fails.
 
 ## Important privacy note
@@ -38,11 +40,25 @@ Email notification secrets:
 | `SMTP_SERVER` or `SMTP_HOST` | Optional SMTP host override |
 | `SMTP_PORT` | Optional SMTP port override, usually `465` or `587` |
 
+## Terminal-status archival
+
+By default, a manuscript is archived after it reaches a terminal status such as `Accepted`, `Published`, `Rejected`, or `Withdrawn`.
+
+Archived manuscripts remain in `data/manuscripts.json`, but they are ignored in later normal monitoring notifications and excluded from daily reports. This prevents an accepted article from being monitored and reported forever.
+
+Optional controls:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ARCHIVE_TERMINAL` | `true` | Disable this to keep terminal manuscripts active. |
+| `INCLUDE_ARCHIVED_IN_REPORT` | `false` | Enable this to include archived manuscripts in daily reports. |
+| `TERMINAL_STATUS_KEYWORDS` | built-in list | Comma-separated terminal status keywords. |
+
 ## Run modes
 
 - `test`: sends a test email only.
 - `normal`: fetches statuses, updates storage, and sends email only when status changes.
-- `daily_report`: fetches statuses, updates storage, and sends all current manuscript statuses.
+- `daily_report`: fetches statuses, updates storage, and sends current active manuscript statuses.
 
 Manual test:
 
