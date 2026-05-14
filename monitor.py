@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -210,22 +211,29 @@ class JournalMonitor:
 
         rows = self.driver.find_elements(By.XPATH, "//table//tr[td]")
         manuscripts: list[dict] = []
+        seen: set[str] = set()
+
         for row in rows:
-            cells = [cell.text.strip() for cell in row.find_elements(By.TAG_NAME, "td")]
+            cells = [self._clean_cell(cell.text) for cell in row.find_elements(By.TAG_NAME, "td")]
             cells = [cell for cell in cells if cell]
             if len(cells) < 3:
                 continue
 
             row_text = " | ".join(cells)
             lowered = row_text.lower()
-            if not any(token in lowered for token in ["submitted", "review", "decision", "revision", "editor", "manuscript", "with "]):
+            if self._looks_like_navigation_row(lowered):
                 continue
 
             manuscript_id = self._pick_manuscript_id(cells)
             title = self._pick_title(cells)
             status = self._pick_status(cells)
-            if not title and not manuscript_id:
+            if not self._looks_like_manuscript_row(cells, manuscript_id, title, status):
                 continue
+
+            unique_key = f"{source}:{manuscript_id}:{title}".lower()
+            if unique_key in seen:
+                continue
+            seen.add(unique_key)
 
             manuscripts.append(
                 {
@@ -241,23 +249,68 @@ class JournalMonitor:
         return manuscripts
 
     @staticmethod
+    def _clean_cell(value: str) -> str:
+        return re.sub(r"\s+", " ", value or "").strip()
+
+    @staticmethod
+    def _looks_like_navigation_row(text: str) -> bool:
+        blocked = [
+            "logout",
+            "log out",
+            "help",
+            "instructions",
+            "privacy",
+            "terms",
+            "search",
+            "create new submission",
+        ]
+        return any(token in text for token in blocked)
+
+    @staticmethod
+    def _looks_like_manuscript_row(cells: list[str], manuscript_id: str, title: str, status: str) -> bool:
+        joined = " ".join(cells).lower()
+        signals = [
+            "submitted",
+            "review",
+            "decision",
+            "revision",
+            "editor",
+            "manuscript",
+            "accept",
+            "reject",
+            "with ",
+        ]
+        return bool((manuscript_id or len(title) > 20) and (status or any(signal in joined for signal in signals)))
+
+    @staticmethod
     def _pick_manuscript_id(cells: list[str]) -> str:
+        id_patterns = [
+            r"\b[A-Z]{1,8}[-_ ]?\d{2,}[-_A-Z0-9]*\b",
+            r"\b\d{4,}[-_A-Z0-9]*\b",
+        ]
         for cell in cells:
-            compact = cell.replace(" ", "")
-            if any(ch.isdigit() for ch in compact) and any(ch.isalpha() for ch in compact) and len(compact) <= 40:
-                return cell
-        return cells[0] if cells else ""
+            compact = cell.strip()
+            if len(compact) > 60:
+                continue
+            for pattern in id_patterns:
+                match = re.search(pattern, compact, flags=re.IGNORECASE)
+                if match:
+                    return match.group(0)
+        return cells[0] if cells and len(cells[0]) <= 60 else ""
 
     @staticmethod
     def _pick_title(cells: list[str]) -> str:
-        candidates = [cell for cell in cells if len(cell) > 20]
+        non_status = [cell for cell in cells if not JournalMonitor._status_score(cell)]
+        candidates = [cell for cell in non_status if len(cell) > 20]
         if candidates:
             return max(candidates, key=len)
-        return cells[-1] if cells else ""
+        long_cells = [cell for cell in cells if len(cell) > 20]
+        return max(long_cells, key=len) if long_cells else (cells[-1] if cells else "")
 
     @staticmethod
-    def _pick_status(cells: list[str]) -> str:
-        status_keywords = [
+    def _status_score(value: str) -> int:
+        text = value.lower()
+        keywords = [
             "submitted",
             "review",
             "decision",
@@ -266,12 +319,20 @@ class JournalMonitor:
             "accept",
             "reject",
             "incomplete",
-            "with",
+            "withdrawn",
+            "published",
+            "with ",
         ]
-        for cell in cells:
-            if any(keyword in cell.lower() for keyword in status_keywords) and len(cell) <= 80:
-                return cell
-        return cells[1] if len(cells) > 1 else "Unknown"
+        return sum(1 for keyword in keywords if keyword in text)
+
+    @staticmethod
+    def _pick_status(cells: list[str]) -> str:
+        scored = [(JournalMonitor._status_score(cell), len(cell), cell) for cell in cells if len(cell) <= 120]
+        scored = [item for item in scored if item[0] > 0]
+        if scored:
+            scored.sort(key=lambda item: (-item[0], item[1]))
+            return scored[0][2]
+        return cells[1] if len(cells) > 1 and len(cells[1]) <= 120 else "Unknown"
 
     def collect_manuscripts(self) -> List[Dict]:
         manuscripts: list[dict] = []
@@ -306,7 +367,7 @@ class JournalMonitor:
             return 1 if Config.FAIL_ON_EMPTY else 0
 
         changed = self.storage.compare_and_update(manuscripts)
-        current = self.storage.get_all_manuscripts()
+        current = self.storage.get_all_manuscripts(include_archived=Config.INCLUDE_ARCHIVED_IN_REPORT)
 
         if mode == "daily_report":
             return 0 if self.notifier.send_daily_report(current) else 1
