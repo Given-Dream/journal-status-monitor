@@ -214,7 +214,8 @@ class JournalMonitor:
         seen: set[str] = set()
 
         for row in rows:
-            cells = [self._clean_cell(cell.text) for cell in row.find_elements(By.TAG_NAME, "td")]
+            raw_cells = [cell.text or "" for cell in row.find_elements(By.TAG_NAME, "td")]
+            cells = [self._clean_cell(cell) for cell in raw_cells]
             cells = [cell for cell in cells if cell]
             if len(cells) < 3:
                 continue
@@ -225,8 +226,8 @@ class JournalMonitor:
                 continue
 
             manuscript_id = self._pick_manuscript_id(cells)
-            title = self._pick_title(cells)
-            status = self._pick_status(cells)
+            status = self._pick_status_from_raw_cells(raw_cells) or self._pick_status(cells)
+            title = self._pick_title(cells, status=status)
             if not self._looks_like_manuscript_row(cells, manuscript_id, title, status):
                 continue
 
@@ -251,6 +252,10 @@ class JournalMonitor:
     @staticmethod
     def _clean_cell(value: str) -> str:
         return re.sub(r"\s+", " ", value or "").strip()
+
+    @staticmethod
+    def _cell_lines(value: str) -> list[str]:
+        return [JournalMonitor._clean_cell(line) for line in (value or "").splitlines() if JournalMonitor._clean_cell(line)]
 
     @staticmethod
     def _looks_like_navigation_row(text: str) -> bool:
@@ -299,13 +304,37 @@ class JournalMonitor:
         return cells[0] if cells and len(cells[0]) <= 60 else ""
 
     @staticmethod
-    def _pick_title(cells: list[str]) -> str:
-        non_status = [cell for cell in cells if not JournalMonitor._status_score(cell)]
-        candidates = [cell for cell in non_status if len(cell) > 20]
+    def _normalize_title(value: str) -> str:
+        text = JournalMonitor._clean_cell(value)
+        action_markers = [
+            r"\bView Submission\b.*$",
+            r"\bSubmitting Author\b.*$",
+            r"\bSubmitted Manuscripts?\b.*$",
+            r"\bManuscript Files\b.*$",
+        ]
+        for pattern in action_markers:
+            text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+        return text.strip(" -|")
+
+    @staticmethod
+    def _pick_title(cells: list[str], status: str = "") -> str:
+        normalized = [JournalMonitor._normalize_title(cell) for cell in cells]
+        blocked = {"contact journal", status.lower().strip()}
+        candidates = []
+        for cell in normalized:
+            lower = cell.lower()
+            if not cell or lower in blocked:
+                continue
+            if lower.startswith(("eic:", "adm:")):
+                continue
+            if JournalMonitor._status_score(cell):
+                continue
+            if len(cell) > 20:
+                candidates.append(cell)
         if candidates:
             return max(candidates, key=len)
-        long_cells = [cell for cell in cells if len(cell) > 20]
-        return max(long_cells, key=len) if long_cells else (cells[-1] if cells else "")
+        long_cells = [cell for cell in normalized if len(cell) > 20]
+        return max(long_cells, key=len) if long_cells else (normalized[-1] if normalized else "")
 
     @staticmethod
     def _status_score(value: str) -> int:
@@ -324,6 +353,31 @@ class JournalMonitor:
             "with ",
         ]
         return sum(1 for keyword in keywords if keyword in text)
+
+    @staticmethod
+    def _line_is_status_candidate(line: str) -> bool:
+        lower = line.lower().strip()
+        if not lower:
+            return False
+        ignored_prefixes = ("contact journal", "eic:", "adm:", "view submission", "submitting author")
+        if lower.startswith(ignored_prefixes):
+            return False
+        return bool(JournalMonitor._status_score(line))
+
+    @staticmethod
+    def _pick_status_from_raw_cells(raw_cells: list[str]) -> str:
+        candidates: list[str] = []
+        for raw_cell in raw_cells:
+            for line in JournalMonitor._cell_lines(raw_cell):
+                if JournalMonitor._line_is_status_candidate(line):
+                    candidates.append(line)
+        if not candidates:
+            return ""
+
+        terminal = [line for line in candidates if Config.is_terminal_status(line)]
+        if terminal:
+            return terminal[0]
+        return candidates[0]
 
     @staticmethod
     def _pick_status(cells: list[str]) -> str:
