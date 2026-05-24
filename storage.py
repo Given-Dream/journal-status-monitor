@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Dict, List
 
@@ -31,13 +32,112 @@ class ManuscriptStorage:
             return {}
 
     def save_manuscripts(self, manuscripts: Dict) -> None:
-        cleaned = self._cleanup_old_records(manuscripts, Config.RETENTION_DAYS)
+        cleaned = self._merge_duplicate_records(manuscripts)
+        cleaned = self._cleanup_old_records(cleaned, Config.RETENTION_DAYS)
         tmp_file = f"{self.data_file}.tmp"
         with open(tmp_file, "w", encoding="utf-8") as file:
             json.dump(cleaned, file, ensure_ascii=False, indent=2, sort_keys=True)
             file.write("\n")
         os.replace(tmp_file, self.data_file)
         print(f"Saved manuscript data to {self.data_file}")
+
+    @staticmethod
+    def _status_score(value: object) -> int:
+        text = str(value or "").lower()
+        if any(keyword in text for keyword in ("accept", "accepted", "published")):
+            return 100
+        if any(keyword in text for keyword in ("reject", "rejected", "withdrawn")):
+            return 90
+        if "decision" in text:
+            return 70
+        if "revision" in text:
+            return 50
+        if "review" in text:
+            return 40
+        if "submitted" in text:
+            return 30
+        return 0
+
+    @staticmethod
+    def _looks_like_date_token(value: object) -> bool:
+        text = str(value or "").strip().lower()
+        months = r"jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec"
+        patterns = [
+            rf"(?:{months})[-_ ]?\d{{2,4}}",
+            rf"\d{{1,2}}[-_ ](?:{months})[-_ ]\d{{2,4}}",
+            r"\d{4}[-_/]\d{1,2}[-_/]\d{1,2}",
+        ]
+        return any(re.fullmatch(pattern, text) for pattern in patterns)
+
+    @staticmethod
+    def _id_quality(value: object) -> int:
+        text = str(value or "").strip()
+        if not text:
+            return 0
+        if ManuscriptStorage._looks_like_date_token(text):
+            return -10
+        if re.search(r"[A-Za-z]", text) and re.search(r"\d", text):
+            return 10
+        if re.search(r"\d", text):
+            return 5
+        return 1
+
+    @staticmethod
+    def _strip_trailing_status_from_title(value: object) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        while True:
+            match = re.search(r"\s+(\((?:[^()]|\([^()]*\))*\))\s*$", text)
+            if not match:
+                break
+            suffix = match.group(1)
+            if ManuscriptStorage._status_score(suffix) <= 0:
+                break
+            text = text[: match.start()].strip()
+        return text
+
+    @staticmethod
+    def _identity_title(value: object) -> str:
+        title = ManuscriptStorage._strip_trailing_status_from_title(value)
+        title = re.sub(r"\s+", " ", title).strip().lower()
+        title = re.sub(r"[^\w\s:;-]", "", title)
+        return re.sub(r"\s+", " ", title).strip()
+
+    @staticmethod
+    def _display_title(value: object) -> str:
+        return ManuscriptStorage._strip_trailing_status_from_title(value) or str(value or "").strip() or "Untitled"
+
+    @staticmethod
+    def _prefer_record(existing: Dict, candidate: Dict) -> Dict:
+        existing_score = ManuscriptStorage._status_score(existing.get("status"))
+        candidate_score = ManuscriptStorage._status_score(candidate.get("status"))
+        chosen = candidate.copy() if candidate_score > existing_score else existing.copy()
+        other = existing if chosen is candidate else candidate
+        if ManuscriptStorage._id_quality(other.get("id")) > ManuscriptStorage._id_quality(chosen.get("id")):
+            chosen["id"] = other.get("id", "")
+        chosen["title"] = ManuscriptStorage._display_title(chosen.get("title"))
+        if existing.get("first_seen") and candidate.get("first_seen"):
+            chosen["first_seen"] = min(str(existing.get("first_seen")), str(candidate.get("first_seen")))
+        if existing.get("archived") or candidate.get("archived") or Config.is_terminal_status(chosen.get("status")):
+            chosen["archived"] = True
+            chosen.setdefault("archived_at", existing.get("archived_at") or candidate.get("archived_at") or chosen.get("last_checked"))
+            chosen.setdefault("archive_reason", "terminal_status")
+        return chosen
+
+    def _merge_duplicate_records(self, manuscripts: Dict) -> Dict:
+        merged: Dict = {}
+        for key, data in manuscripts.items():
+            if not isinstance(data, dict):
+                continue
+            source = str(data.get("source", "unknown")).strip() or "unknown"
+            identity = self._identity_title(data.get("title")) or str(data.get("id", "")).strip() or str(key)
+            merged_key = f"{source}:{identity}"
+            normalized = data.copy()
+            normalized["title"] = self._display_title(normalized.get("title"))
+            if merged_key in merged:
+                merged[merged_key] = self._prefer_record(merged[merged_key], normalized)
+            else:
+                merged[merged_key] = normalized
+        return merged
 
     @staticmethod
     def _parse_time(value: str | None) -> datetime | None:
@@ -74,7 +174,8 @@ class ManuscriptStorage:
         source = str(manuscript.get("source", "unknown")).strip() or "unknown"
         manuscript_id = str(manuscript.get("id", "")).strip()
         title = str(manuscript.get("title", "")).strip()
-        return f"{source}:{manuscript_id or title}"
+        identity_title = ManuscriptStorage._identity_title(title)
+        return f"{source}:{identity_title or manuscript_id or title}"
 
     def compare_and_update(self, new_manuscripts: List[Dict]) -> List[Dict]:
         old_data = self.load_manuscripts()
@@ -90,7 +191,7 @@ class ManuscriptStorage:
             seen_keys.add(key)
 
             current_status = str(manuscript.get("status", "Unknown")).strip() or "Unknown"
-            title = str(manuscript.get("title", "Untitled")).strip() or "Untitled"
+            title = self._display_title(manuscript.get("title", "Untitled"))
             old_record = old_data.get(key)
             old_archived = bool(old_record and old_record.get("archived"))
             now_terminal = Config.is_terminal_status(current_status)
