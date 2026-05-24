@@ -373,10 +373,8 @@ class JournalMonitor:
                     candidates.append(line)
         if not candidates:
             return ""
-
-        terminal = [line for line in candidates if Config.is_terminal_status(line)]
-        if terminal:
-            return terminal[0]
+        # ScholarOne status column is ordered newest -> oldest.
+        # Always use the first status line as the current status.
         return candidates[0]
 
     @staticmethod
