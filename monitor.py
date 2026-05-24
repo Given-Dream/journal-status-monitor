@@ -226,7 +226,8 @@ class JournalMonitor:
                 continue
 
             manuscript_id = self._pick_manuscript_id(cells)
-            status = self._pick_status_from_raw_cells(raw_cells) or self._pick_status(cells)
+            status_index = self._find_status_cell_index(row, len(raw_cells))
+            status = self._pick_status_from_raw_cells(raw_cells, status_index=status_index) or self._pick_status(cells)
             title = self._pick_title(cells, status=status)
             if not self._looks_like_manuscript_row(cells, manuscript_id, title, status):
                 continue
@@ -359,23 +360,137 @@ class JournalMonitor:
         lower = line.lower().strip()
         if not lower:
             return False
-        ignored_prefixes = ("contact journal", "eic:", "adm:", "view submission", "submitting author")
+        ignored_prefixes = (
+            "contact journal",
+            "eic:",
+            "adm:",
+            "view submission",
+            "submitting author",
+            "manuscript files",
+            "action",
+        )
         if lower.startswith(ignored_prefixes):
             return False
         return bool(JournalMonitor._status_score(line))
 
     @staticmethod
-    def _pick_status_from_raw_cells(raw_cells: list[str]) -> str:
+    def _status_date_key(line: str) -> tuple[int, int, int] | None:
+        month_map = {
+            "jan": 1,
+            "feb": 2,
+            "mar": 3,
+            "apr": 4,
+            "may": 5,
+            "jun": 6,
+            "jul": 7,
+            "aug": 8,
+            "sep": 9,
+            "sept": 9,
+            "oct": 10,
+            "nov": 11,
+            "dec": 12,
+        }
+        match = re.search(r"\b(\d{1,2})[-/\s]([A-Za-z]{3,9})[-/\s](\d{2,4})\b", line)
+        if match:
+            day = int(match.group(1))
+            month = month_map.get(match.group(2).lower()[:3])
+            year = int(match.group(3))
+            if year < 100:
+                year += 2000
+            if month:
+                return (year, month, day)
+        match = re.search(r"\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b", line)
+        if match:
+            return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        return None
+
+    @staticmethod
+    def _status_lines_from_cell(raw_cell: str) -> list[str]:
+        status_lines: list[str] = []
+        for line in JournalMonitor._cell_lines(raw_cell):
+            cleaned = re.sub(r"^(current\s+)?status\s*:?\s*", "", line, flags=re.IGNORECASE).strip()
+            if JournalMonitor._line_is_status_candidate(cleaned):
+                status_lines.append(cleaned)
+        return status_lines
+
+    @staticmethod
+    def _choose_current_status(status_lines: list[str]) -> str:
+        if not status_lines:
+            return ""
+        # ScholarOne renders the STATUS history newest -> oldest.
+        # The visual top line is therefore the current status even if older
+        # lines contain later-looking dates from revision activity.
+        return status_lines[0]
+
+    @staticmethod
+    def _status_cell_score(raw_cell: str) -> int:
+        lines = JournalMonitor._status_lines_from_cell(raw_cell)
+        if not lines:
+            return 0
+        joined = " ".join(JournalMonitor._cell_lines(raw_cell)).lower()
+        score = 10 + len(lines) * 5
+        if re.search(r"\b(current\s+)?status\b", joined):
+            score += 25
+        if len(lines) > 1:
+            score += 15
+        if JournalMonitor._status_date_key(lines[0]) is not None:
+            score += 10
+        if any(JournalMonitor._status_date_key(line) is not None for line in lines):
+            score += 5
+        if re.search(r"\b(view submission|contact journal|manuscript files|submitting author)\b", joined):
+            score -= 25
+        if len(JournalMonitor._clean_cell(raw_cell)) > 500:
+            score -= 10
+        return score
+
+    @staticmethod
+    def _pick_status_from_raw_cells(raw_cells: list[str], status_index: int | None = None) -> str:
+        if status_index is not None and 0 <= status_index < len(raw_cells):
+            status = JournalMonitor._choose_current_status(JournalMonitor._status_lines_from_cell(raw_cells[status_index]))
+            if status:
+                return status
+
+        scored_cells = [
+            (JournalMonitor._status_cell_score(raw_cell), index, raw_cell)
+            for index, raw_cell in enumerate(raw_cells)
+        ]
+        scored_cells = [item for item in scored_cells if item[0] > 0]
+        if scored_cells:
+            scored_cells.sort(key=lambda item: (-item[0], item[1]))
+            return JournalMonitor._choose_current_status(JournalMonitor._status_lines_from_cell(scored_cells[0][2]))
+
         candidates: list[str] = []
         for raw_cell in raw_cells:
-            for line in JournalMonitor._cell_lines(raw_cell):
-                if JournalMonitor._line_is_status_candidate(line):
-                    candidates.append(line)
+            candidates.extend(JournalMonitor._status_lines_from_cell(raw_cell))
         if not candidates:
             return ""
-        # ScholarOne status column is ordered newest -> oldest.
-        # Always use the first status line as the current status.
-        return candidates[0]
+        return JournalMonitor._choose_current_status(candidates)
+
+    @staticmethod
+    def _find_status_cell_index(row: object, cell_count: int) -> int | None:
+        try:
+            cells = row.find_elements(By.TAG_NAME, "td")
+            for index, cell in enumerate(cells):
+                labels = [
+                    cell.get_attribute("data-label") or "",
+                    cell.get_attribute("aria-label") or "",
+                    cell.get_attribute("headers") or "",
+                ]
+                if any(re.search(r"\bstatus\b", label, flags=re.IGNORECASE) for label in labels):
+                    return index
+
+            table = row.find_element(By.XPATH, "./ancestor::table[1]")
+            header_rows = table.find_elements(By.XPATH, ".//tr[th]")
+            for header_row in reversed(header_rows):
+                headers = [JournalMonitor._clean_cell(th.text) for th in header_row.find_elements(By.TAG_NAME, "th")]
+                if len(headers) != cell_count:
+                    continue
+                for index, header in enumerate(headers):
+                    if re.search(r"\bstatus\b", header, flags=re.IGNORECASE):
+                        return index
+        except Exception:
+            return None
+        return None
 
     @staticmethod
     def _pick_status(cells: list[str]) -> str:
