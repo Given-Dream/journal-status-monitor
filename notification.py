@@ -20,6 +20,26 @@ CN_FROM_NAME = c(r"\u671f\u520a\u72b6\u6001\u76d1\u63a7")
 CN_TEST_SUBJECT = c(r"\u671f\u520a\u72b6\u6001\u76d1\u63a7\u6d4b\u8bd5\u90ae\u4ef6")
 CN_CHANGE_SUBJECT = c(r"\u671f\u520a\u7a3f\u4ef6\u72b6\u6001\u66f4\u65b0\u901a\u77e5")
 CN_DAILY_SUBJECT = c(r"\u671f\u520a\u7a3f\u4ef6\u6bcf\u65e5\u72b6\u6001\u62a5\u544a")
+CN_GENERATED_AT = c(r"\u751f\u6210\u65f6\u95f4")
+CN_EMAIL_CONFIG_AVAILABLE = c(r"\u90ae\u4ef6\u901a\u77e5\u914d\u7f6e\u5df2\u7ecf\u53ef\u7528")
+CN_TEST_RESULT = c(r"\u6d4b\u8bd5\u7ed3\u679c")
+CN_SEND_SUCCESS = c(r"\u53d1\u9001\u6210\u529f")
+CN_TEST_TEXT = c(r"\u5982\u679c\u4f60\u6536\u5230\u8fd9\u5c01\u90ae\u4ef6\uff0c\u8bf4\u660e\u90ae\u4ef6\u901a\u77e5\u914d\u7f6e\u5df2\u7ecf\u53ef\u7528\u3002")
+CN_TEST_DETAIL = c(r"\u5982\u679c\u4f60\u6536\u5230\u8fd9\u5c01\u90ae\u4ef6\uff0c\u8bf4\u660e GitHub Actions \u4e2d\u7684\u90ae\u4ef6\u901a\u77e5\u914d\u7f6e\u5df2\u7ecf\u751f\u6548\u3002")
+CN_PAPER_COUNT_UNIT = c(r"\u7bc7")
+CN_SOURCE = c(r"\u6765\u6e90")
+CN_MANUSCRIPT_ID = c(r"\u7a3f\u4ef6 ID")
+CN_STATUS_CHANGE = c(r"\u72b6\u6001\u53d8\u5316")
+CN_CHANGED_AT = c(r"\u53d8\u5316\u65f6\u95f4")
+CN_CURRENT_STATUS = c(r"\u5f53\u524d\u72b6\u6001")
+CN_CHECKED_AT = c(r"\u68c0\u67e5\u65f6\u95f4")
+CN_SUBMISSION_SYSTEM = c(r"\u6295\u7a3f\u7cfb\u7edf")
+CN_OPEN_SUBMISSION_SYSTEM = c(r"\u6253\u5f00\u6295\u7a3f\u7cfb\u7edf")
+CN_CHANGE_SUBTITLE_PREFIX = c(r"\u68c0\u6d4b\u5230")
+CN_CHANGE_SUBTITLE_SUFFIX = c(r"\u7bc7\u7a3f\u4ef6\u72b6\u6001\u53d1\u751f\u53d8\u5316")
+CN_DAILY_SUBTITLE_PREFIX = c(r"\u5f53\u524d\u76d1\u63a7")
+CN_DAILY_SUBTITLE_SUFFIX = c(r"\u7bc7\u7a3f\u4ef6")
+CN_FOOTER_PREFIX = c(r"\u672c\u90ae\u4ef6\u7531\u671f\u520a\u72b6\u6001\u76d1\u63a7\u7a0b\u5e8f\u81ea\u52a8\u53d1\u9001\u3002\u751f\u6210\u65f6\u95f4")
 
 
 class EmailNotifier:
@@ -36,31 +56,31 @@ class EmailNotifier:
             [
                 CN_TEST_SUBJECT,
                 "=" * 24,
-                f"{c(r'\u751f\u6210\u65f6\u95f4')}: {now}",
+                f"{CN_GENERATED_AT}: {now}",
                 f"SMTP: {self.smtp_host}:{self.smtp_port}",
-                c(r"\u5982\u679c\u4f60\u6536\u5230\u8fd9\u5c01\u90ae\u4ef6\uff0c\u8bf4\u660e\u90ae\u4ef6\u901a\u77e5\u914d\u7f6e\u5df2\u7ecf\u53ef\u7528\u3002"),
+                CN_TEST_TEXT,
             ]
         )
         body = (
             self._summary_card(
-                c(r"\u6d4b\u8bd5\u7ed3\u679c"),
-                c(r"\u53d1\u9001\u6210\u529f"),
-                c(r"\u5982\u679c\u4f60\u6536\u5230\u8fd9\u5c01\u90ae\u4ef6\uff0c\u8bf4\u660e GitHub Actions \u4e2d\u7684\u90ae\u4ef6\u901a\u77e5\u914d\u7f6e\u5df2\u7ecf\u751f\u6548\u3002"),
+                CN_TEST_RESULT,
+                CN_SEND_SUCCESS,
+                CN_TEST_DETAIL,
             )
             + self._meta_grid(
                 [
-                    (c(r"\u751f\u6210\u65f6\u95f4"), now),
+                    (CN_GENERATED_AT, now),
                     ("SMTP", f"{self.smtp_host}:{self.smtp_port}"),
                 ]
             )
         )
-        return self._send(subject, text, self._page(CN_TEST_SUBJECT, c(r"\u90ae\u4ef6\u901a\u77e5\u914d\u7f6e\u5df2\u7ecf\u53ef\u7528"), body))
+        return self._send(subject, text, self._page(CN_TEST_SUBJECT, CN_EMAIL_CONFIG_AVAILABLE, body))
 
     def send_change_notification(self, changed_manuscripts: List[Dict]) -> bool:
         if not changed_manuscripts:
             print("No status changes to notify.")
             return True
-        subject = f"{CN_CHANGE_SUBJECT}\uff08{len(changed_manuscripts)}{c(r'\u7bc7')}\uff09"
+        subject = f"{CN_CHANGE_SUBJECT}\uff08{len(changed_manuscripts)}{CN_PAPER_COUNT_UNIT}\uff09"
         return self._send(
             subject,
             self._generate_change_text(changed_manuscripts),
@@ -71,7 +91,7 @@ class EmailNotifier:
         if not all_manuscripts:
             print("No manuscripts available for the daily report.")
             return True
-        subject = f"{CN_DAILY_SUBJECT}\uff08{len(all_manuscripts)}{c(r'\u7bc7')}\uff09"
+        subject = f"{CN_DAILY_SUBJECT}\uff08{len(all_manuscripts)}{CN_PAPER_COUNT_UNIT}\uff09"
         return self._send(
             subject,
             self._generate_daily_text(all_manuscripts),
@@ -106,7 +126,7 @@ class EmailNotifier:
     @staticmethod
     def _page(title: str, subtitle: str, body: str) -> str:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        footer = c(r"\u672c\u90ae\u4ef6\u7531\u671f\u520a\u72b6\u6001\u76d1\u63a7\u7a0b\u5e8f\u81ea\u52a8\u53d1\u9001\u3002\u751f\u6210\u65f6\u95f4")
+        footer = CN_FOOTER_PREFIX
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -168,14 +188,15 @@ class EmailNotifier:
             rows.append(
                 f"""<div class="item">
   <div class="title">{index}. {html.escape(str(item.get("title", "Untitled")))}</div>
-  {self._field(c(r'\u6765\u6e90'), f'<span class="badge">{html.escape(str(item.get("source", "")))}</span>', raw=True)}
-  {self._field(c(r'\u7a3f\u4ef6 ID'), html.escape(str(item.get("id", ""))), raw=True)}
-  {self._field(c(r'\u72b6\u6001\u53d8\u5316'), f'<span class="old">{html.escape(str(item.get("old_status", "")))}</span> -> <span class="new">{html.escape(str(item.get("new_status", "")))}</span>', raw=True)}
-  {self._field(c(r'\u53d8\u5316\u65f6\u95f4'), html.escape(str(item.get("changed_at", ""))), raw=True)}
+  {self._field(CN_SOURCE, f'<span class="badge">{html.escape(str(item.get("source", "")))}</span>', raw=True)}
+  {self._field(CN_MANUSCRIPT_ID, html.escape(str(item.get("id", ""))), raw=True)}
+  {self._field(CN_STATUS_CHANGE, f'<span class="old">{html.escape(str(item.get("old_status", "")))}</span> -> <span class="new">{html.escape(str(item.get("new_status", "")))}</span>', raw=True)}
+  {self._field(CN_CHANGED_AT, html.escape(str(item.get("changed_at", ""))), raw=True)}
   {self._link_html(item.get("url"))}
 </div>"""
             )
-        return self._page(CN_CHANGE_SUBJECT, f"{c(r'\u68c0\u6d4b\u5230')} {len(manuscripts)} {c(r'\u7bc7\u7a3f\u4ef6\u72b6\u6001\u53d1\u751f\u53d8\u5316')}", "\n".join(rows))
+        subtitle = f"{CN_CHANGE_SUBTITLE_PREFIX} {len(manuscripts)} {CN_CHANGE_SUBTITLE_SUFFIX}"
+        return self._page(CN_CHANGE_SUBJECT, subtitle, "\n".join(rows))
 
     def _generate_daily_html(self, manuscripts: List[Dict]) -> str:
         rows = []
@@ -183,14 +204,15 @@ class EmailNotifier:
             rows.append(
                 f"""<div class="item">
   <div class="title">{index}. {html.escape(str(item.get("title", "Untitled")))}</div>
-  {self._field(c(r'\u6765\u6e90'), f'<span class="badge">{html.escape(str(item.get("source", "")))}</span>', raw=True)}
-  {self._field(c(r'\u7a3f\u4ef6 ID'), html.escape(str(item.get("id", ""))), raw=True)}
-  {self._field(c(r'\u5f53\u524d\u72b6\u6001'), f'<span class="status">{html.escape(str(item.get("status", "")))}</span>', raw=True)}
-  {self._field(c(r'\u68c0\u67e5\u65f6\u95f4'), html.escape(str(item.get("last_checked", ""))), raw=True)}
+  {self._field(CN_SOURCE, f'<span class="badge">{html.escape(str(item.get("source", "")))}</span>', raw=True)}
+  {self._field(CN_MANUSCRIPT_ID, html.escape(str(item.get("id", ""))), raw=True)}
+  {self._field(CN_CURRENT_STATUS, f'<span class="status">{html.escape(str(item.get("status", "")))}</span>', raw=True)}
+  {self._field(CN_CHECKED_AT, html.escape(str(item.get("last_checked", ""))), raw=True)}
   {self._link_html(item.get("url"))}
 </div>"""
             )
-        return self._page(CN_DAILY_SUBJECT, f"{c(r'\u5f53\u524d\u76d1\u63a7')} {len(manuscripts)} {c(r'\u7bc7\u7a3f\u4ef6')}", "\n".join(rows))
+        subtitle = f"{CN_DAILY_SUBTITLE_PREFIX} {len(manuscripts)} {CN_DAILY_SUBTITLE_SUFFIX}"
+        return self._page(CN_DAILY_SUBJECT, subtitle, "\n".join(rows))
 
     @staticmethod
     def _field(label: str, value: str, raw: bool = False) -> str:
@@ -202,7 +224,7 @@ class EmailNotifier:
         if not url:
             return ""
         safe_url = html.escape(str(url), quote=True)
-        return f'<a class="button" href="{safe_url}">{c(r"\u6253\u5f00\u6295\u7a3f\u7cfb\u7edf")}</a>'
+        return f'<a class="button" href="{safe_url}">{CN_OPEN_SUBMISSION_SYSTEM}</a>'
 
     @staticmethod
     def _generate_change_text(manuscripts: List[Dict]) -> str:
@@ -211,11 +233,11 @@ class EmailNotifier:
             lines.extend(
                 [
                     f"{index}. {item.get('title', 'Untitled')}",
-                    f"   {c(r'\u6765\u6e90')}: {item.get('source', '')}",
-                    f"   {c(r'\u7a3f\u4ef6 ID')}: {item.get('id', '')}",
-                    f"   {c(r'\u72b6\u6001\u53d8\u5316')}: {item.get('old_status', '')} -> {item.get('new_status', '')}",
-                    f"   {c(r'\u53d8\u5316\u65f6\u95f4')}: {item.get('changed_at', '')}",
-                    f"   {c(r'\u6295\u7a3f\u7cfb\u7edf')}: {item.get('url', '')}",
+                    f"   {CN_SOURCE}: {item.get('source', '')}",
+                    f"   {CN_MANUSCRIPT_ID}: {item.get('id', '')}",
+                    f"   {CN_STATUS_CHANGE}: {item.get('old_status', '')} -> {item.get('new_status', '')}",
+                    f"   {CN_CHANGED_AT}: {item.get('changed_at', '')}",
+                    f"   {CN_SUBMISSION_SYSTEM}: {item.get('url', '')}",
                     "",
                 ]
             )
@@ -228,11 +250,11 @@ class EmailNotifier:
             lines.extend(
                 [
                     f"{index}. {item.get('title', 'Untitled')}",
-                    f"   {c(r'\u6765\u6e90')}: {item.get('source', '')}",
-                    f"   {c(r'\u7a3f\u4ef6 ID')}: {item.get('id', '')}",
-                    f"   {c(r'\u5f53\u524d\u72b6\u6001')}: {item.get('status', '')}",
-                    f"   {c(r'\u68c0\u67e5\u65f6\u95f4')}: {item.get('last_checked', '')}",
-                    f"   {c(r'\u6295\u7a3f\u7cfb\u7edf')}: {item.get('url', '')}",
+                    f"   {CN_SOURCE}: {item.get('source', '')}",
+                    f"   {CN_MANUSCRIPT_ID}: {item.get('id', '')}",
+                    f"   {CN_CURRENT_STATUS}: {item.get('status', '')}",
+                    f"   {CN_CHECKED_AT}: {item.get('last_checked', '')}",
+                    f"   {CN_SUBMISSION_SYSTEM}: {item.get('url', '')}",
                     "",
                 ]
             )
