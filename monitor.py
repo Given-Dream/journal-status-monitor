@@ -292,18 +292,26 @@ class JournalMonitor:
             "manuscript",
             "accept",
             "reject",
-            "with ",
+            "awaiting",
+            "processing",
         ]
         return bool((manuscript_id or len(title) > 20) and (status or any(signal in joined for signal in signals)))
 
     @staticmethod
     def _pick_manuscript_id(cells: list[str]) -> str:
+        strong_id_patterns = [
+            r"\b\d{2}-[A-Z]{1,8}-\d{2,}[-_A-Z0-9]*\b",
+        ]
         id_patterns = [
             r"\b[A-Z]{1,8}[-_ ]?\d{2,}[-_A-Z0-9]*\b",
             r"\b\d{4,}[-_A-Z0-9]*\b",
         ]
         for cell in cells:
             compact = cell.strip()
+            for pattern in strong_id_patterns:
+                match = re.search(pattern, compact, flags=re.IGNORECASE)
+                if match and not JournalMonitor._looks_like_date_token(match.group(0)):
+                    return match.group(0)
             if len(compact) > 60:
                 continue
             for pattern in id_patterns:
@@ -416,6 +424,8 @@ class JournalMonitor:
                 continue
             if lower.startswith(("eic:", "adm:")):
                 continue
+            if JournalMonitor._looks_like_identifier_cell(cell):
+                continue
             if JournalMonitor._status_score(cell):
                 continue
             if len(cell) > 20:
@@ -426,6 +436,19 @@ class JournalMonitor:
         return max(long_cells, key=len) if long_cells else (normalized[-1] if normalized else "")
 
     @staticmethod
+    def _looks_like_identifier_cell(value: str) -> bool:
+        text = str(value or "").strip()
+        if not text:
+            return False
+        if re.search(r"\bREX-PROD\b", text, flags=re.IGNORECASE):
+            return True
+        if re.search(r"\b[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\b", text, flags=re.IGNORECASE):
+            return True
+        if re.fullmatch(r"\d{2}-[A-Z]{1,8}-\d{2,}.*", text, flags=re.IGNORECASE):
+            return True
+        return False
+
+    @staticmethod
     def _status_score(value: str) -> int:
         text = value.lower()
         keywords = [
@@ -434,12 +457,17 @@ class JournalMonitor:
             "decision",
             "revision",
             "editor",
+            "awaiting",
+            "processing",
             "accept",
             "reject",
             "incomplete",
             "withdrawn",
             "published",
-            "with ",
+            "with editor",
+            "with reviewer",
+            "with associate editor",
+            "with editor-in-chief",
         ]
         return sum(1 for keyword in keywords if keyword in text)
 
@@ -495,11 +523,35 @@ class JournalMonitor:
     @staticmethod
     def _status_lines_from_cell(raw_cell: str) -> list[str]:
         status_lines: list[str] = []
-        for line in JournalMonitor._cell_lines(raw_cell):
+        lines = JournalMonitor._cell_lines(raw_cell)
+        index = 0
+        while index < len(lines):
+            line = lines[index]
             cleaned = re.sub(r"^(current\s+)?status\s*:?\s*", "", line, flags=re.IGNORECASE).strip()
+            if index + 1 < len(lines) and JournalMonitor._should_join_status_lines(cleaned, lines[index + 1]):
+                cleaned = f"{cleaned} {lines[index + 1]}".strip()
+                index += 1
             if JournalMonitor._line_is_status_candidate(cleaned):
                 status_lines.append(cleaned)
+            index += 1
         return status_lines
+
+    @staticmethod
+    def _should_join_status_lines(current: str, next_line: str) -> bool:
+        current_text = str(current or "").strip()
+        next_text = str(next_line or "").strip()
+        if not current_text or not next_text:
+            return False
+        lower_next = next_text.lower()
+        if current_text.count("(") > current_text.count(")"):
+            return True
+        if lower_next in {"processing"}:
+            return True
+        if re.fullmatch(r"\(?\d{1,2}[-/\s][A-Za-z]{3,9}[-/\s]?\d{2,4}\)?", next_text):
+            return True
+        if re.fullmatch(r"\d{2,4}\)?", next_text) and re.search(r"\([A-Za-z]{3,9}[-/\s]*$", current_text):
+            return True
+        return False
 
     @staticmethod
     def _choose_current_status(status_lines: list[str]) -> str:
