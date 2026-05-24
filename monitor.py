@@ -210,7 +210,7 @@ class JournalMonitor:
             return []
 
         rows = self.driver.find_elements(By.XPATH, "//table//tr[td]")
-        manuscripts: list[dict] = []
+        manuscripts_by_title: dict[str, dict] = {}
         seen: set[str] = set()
 
         for row in rows:
@@ -225,28 +225,36 @@ class JournalMonitor:
             if self._looks_like_navigation_row(lowered):
                 continue
 
-            manuscript_id = self._pick_manuscript_id(cells)
             status_index = self._find_status_cell_index(row, len(raw_cells))
             status = self._pick_status_from_raw_cells(raw_cells, status_index=status_index) or self._pick_status(cells)
             title = self._pick_title(cells, status=status)
+            manuscript_id = self._pick_manuscript_id(cells)
             if not self._looks_like_manuscript_row(cells, manuscript_id, title, status):
                 continue
 
-            unique_key = f"{source}:{manuscript_id}:{title}".lower()
+            identity_title = self._manuscript_identity_title(title)
+            unique_key = f"{source}:{identity_title or manuscript_id}".lower()
             if unique_key in seen:
-                continue
-            seen.add(unique_key)
-
-            manuscripts.append(
-                {
+                current = {
                     "id": manuscript_id or title[:80],
-                    "title": title or "Untitled manuscript",
+                    "title": self._display_title(title),
                     "status": status or "Unknown",
                     "source": source,
                     "url": url,
                 }
-            )
+                manuscripts_by_title[unique_key] = self._prefer_current_record(manuscripts_by_title[unique_key], current)
+                continue
+            seen.add(unique_key)
 
+            manuscripts_by_title[unique_key] = {
+                "id": manuscript_id or title[:80],
+                "title": self._display_title(title),
+                "status": status or "Unknown",
+                "source": source,
+                "url": url,
+            }
+
+        manuscripts = list(manuscripts_by_title.values())
         print(f"Parsed {len(manuscripts)} {source} manuscript(s).")
         return manuscripts
 
@@ -300,9 +308,20 @@ class JournalMonitor:
                 continue
             for pattern in id_patterns:
                 match = re.search(pattern, compact, flags=re.IGNORECASE)
-                if match:
+                if match and not JournalMonitor._looks_like_date_token(match.group(0)):
                     return match.group(0)
         return cells[0] if cells and len(cells[0]) <= 60 else ""
+
+    @staticmethod
+    def _looks_like_date_token(value: str) -> bool:
+        text = str(value or "").strip().lower()
+        months = r"jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec"
+        patterns = [
+            rf"(?:{months})[-_ ]?\d{{2,4}}",
+            rf"\d{{1,2}}[-_ ](?:{months})[-_ ]\d{{2,4}}",
+            r"\d{4}[-_/]\d{1,2}[-_/]\d{1,2}",
+        ]
+        return any(re.fullmatch(pattern, text) for pattern in patterns)
 
     @staticmethod
     def _normalize_title(value: str) -> str:
@@ -316,6 +335,75 @@ class JournalMonitor:
         for pattern in action_markers:
             text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
         return text.strip(" -|")
+
+    @staticmethod
+    def _strip_trailing_status_from_title(value: str) -> str:
+        text = JournalMonitor._normalize_title(value)
+        while True:
+            match = re.search(r"\s+(\((?:[^()]|\([^()]*\))*\))\s*$", text)
+            if not match:
+                break
+            suffix = match.group(1)
+            if not JournalMonitor._status_score(suffix):
+                break
+            text = text[: match.start()].strip()
+        return text
+
+    @staticmethod
+    def _display_title(value: str) -> str:
+        return JournalMonitor._strip_trailing_status_from_title(value) or JournalMonitor._normalize_title(value) or "Untitled manuscript"
+
+    @staticmethod
+    def _manuscript_identity_title(value: str) -> str:
+        title = JournalMonitor._strip_trailing_status_from_title(value)
+        title = re.sub(r"\s+", " ", title).strip().lower()
+        title = re.sub(r"[^\w\s:;-]", "", title)
+        return re.sub(r"\s+", " ", title).strip()
+
+    @staticmethod
+    def _status_priority(status: object) -> int:
+        text = str(status or "").lower()
+        if any(keyword in text for keyword in ("accept", "accepted", "published")):
+            return 100
+        if any(keyword in text for keyword in ("reject", "rejected", "withdrawn")):
+            return 90
+        if "decision" in text:
+            return 70
+        if "revision" in text:
+            return 50
+        if "review" in text:
+            return 40
+        if "submitted" in text:
+            return 30
+        return JournalMonitor._status_score(text)
+
+    @staticmethod
+    def _id_quality(manuscript_id: object) -> int:
+        text = str(manuscript_id or "").strip()
+        if not text:
+            return 0
+        if JournalMonitor._looks_like_date_token(text):
+            return -10
+        if re.search(r"[A-Za-z]", text) and re.search(r"\d", text):
+            return 10
+        if re.search(r"\d", text):
+            return 5
+        return 1
+
+    @staticmethod
+    def _prefer_current_record(existing: dict, candidate: dict) -> dict:
+        existing_score = JournalMonitor._status_priority(existing.get("status"))
+        candidate_score = JournalMonitor._status_priority(candidate.get("status"))
+        if candidate_score > existing_score:
+            chosen = {**candidate}
+            if JournalMonitor._id_quality(existing.get("id")) > JournalMonitor._id_quality(candidate.get("id")):
+                chosen["id"] = existing.get("id", "")
+            return chosen
+        if candidate_score == existing_score and JournalMonitor._id_quality(candidate.get("id")) > JournalMonitor._id_quality(existing.get("id")):
+            chosen = {**existing}
+            chosen["id"] = candidate.get("id", "")
+            return chosen
+        return existing
 
     @staticmethod
     def _pick_title(cells: list[str], status: str = "") -> str:
