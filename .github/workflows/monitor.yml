@@ -2,8 +2,8 @@ name: Journal Status Monitor
 
 on:
   schedule:
-    - cron: '17 0 * * *'
-    - cron: '17 4 * * *'
+    - cron: '17,27,37 0 * * *'
+    - cron: '17,27,37 4 * * *'
     - cron: '17 14 * * *'
   workflow_dispatch:
     inputs:
@@ -56,7 +56,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "17 0 * * *" ]; then
+          elif [ "${{ github.event.schedule }}" = "17,27,37 0 * * *" ]; then
             echo "mode=daily_report" >> "$GITHUB_OUTPUT"
           else
             echo "mode=normal" >> "$GITHUB_OUTPUT"
@@ -97,7 +97,7 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           mkdir -p data
-          git add data/manuscripts.json || true
+          git add -f data/manuscripts.json data/manuscripts.meta.json || true
           if git diff --staged --quiet; then
             echo "No data changes."
           else
