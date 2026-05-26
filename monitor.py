@@ -304,21 +304,24 @@ class JournalMonitor:
         ]
         id_patterns = [
             r"\b[A-Z]{1,8}[-_ ]?\d{2,}[-_A-Z0-9]*\b",
-            r"\b\d{4,}[-_A-Z0-9]*\b",
+            r"\b\d{5,}[-_A-Z0-9]*\b",
         ]
         for cell in cells:
             compact = cell.strip()
             for pattern in strong_id_patterns:
                 match = re.search(pattern, compact, flags=re.IGNORECASE)
-                if match and not JournalMonitor._looks_like_date_token(match.group(0)):
+                if match and not JournalMonitor._looks_like_non_manuscript_id(match.group(0)):
                     return match.group(0)
             if len(compact) > 60:
                 continue
             for pattern in id_patterns:
                 match = re.search(pattern, compact, flags=re.IGNORECASE)
-                if match and not JournalMonitor._looks_like_date_token(match.group(0)):
+                if match and not JournalMonitor._looks_like_non_manuscript_id(match.group(0)):
                     return match.group(0)
-        return cells[0] if cells and len(cells[0]) <= 60 else ""
+        fallback = cells[0].strip() if cells else ""
+        if fallback and len(fallback) <= 60 and not JournalMonitor._looks_like_non_manuscript_id(fallback):
+            return fallback
+        return ""
 
     @staticmethod
     def _looks_like_date_token(value: str) -> bool:
@@ -330,6 +333,19 @@ class JournalMonitor:
             r"\d{4}[-_/]\d{1,2}[-_/]\d{1,2}",
         ]
         return any(re.fullmatch(pattern, text) for pattern in patterns)
+
+    @staticmethod
+    def _looks_like_non_manuscript_id(value: str) -> bool:
+        text = str(value or "").strip()
+        if not text:
+            return True
+        if JournalMonitor._looks_like_date_token(text):
+            return True
+        if re.fullmatch(r"(?:19|20)\d{2}", text):
+            return True
+        if JournalMonitor._status_score(text):
+            return True
+        return False
 
     @staticmethod
     def _normalize_title(value: str) -> str:
@@ -390,7 +406,7 @@ class JournalMonitor:
         text = str(manuscript_id or "").strip()
         if not text:
             return 0
-        if JournalMonitor._looks_like_date_token(text):
+        if JournalMonitor._looks_like_non_manuscript_id(text):
             return -10
         if re.search(r"[A-Za-z]", text) and re.search(r"\d", text):
             return 10
