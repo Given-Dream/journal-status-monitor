@@ -74,7 +74,8 @@ async function dispatchWorkflow(env, mode) {
 
 export default {
   async scheduled(event, env, ctx) {
-    const mode = resolveMode();
+    const scheduledAt = event.scheduledTime ? new Date(event.scheduledTime) : new Date();
+    const mode = resolveMode(scheduledAt);
     if (!mode) {
       console.log("Outside configured Beijing trigger windows; skipped.");
       return;
