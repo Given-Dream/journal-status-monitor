@@ -2,9 +2,9 @@ name: Journal Status Monitor
 
 on:
   schedule:
-    - cron: '0 1 * * *'
-    - cron: '0 5 * * *'
-    - cron: '0 14 * * *'
+    - cron: '17 1 * * *'
+    - cron: '17 5 * * *'
+    - cron: '17 14 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -56,7 +56,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "0 1 * * *" ]; then
+          elif [ "${{ github.event.schedule }}" = "17 1 * * *" ]; then
             echo "mode=daily_report" >> "$GITHUB_OUTPUT"
           else
             echo "mode=normal" >> "$GITHUB_OUTPUT"
