@@ -233,6 +233,8 @@ class ManuscriptStorage:
     def _notify_on_first_seen(status: object) -> bool:
         if not getattr(Config, "NOTIFY_ON_FIRST_SEEN", True):
             return False
+        if Config.is_terminal_status(status):
+            return False
         return not ManuscriptStorage._is_silent_first_seen_status(status)
 
     @staticmethod
