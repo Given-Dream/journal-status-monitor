@@ -46,8 +46,22 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Chrome
-        uses: browser-actions/setup-chrome@v1
+      - name: Check Chrome
+        shell: bash
+        run: |
+          set -e
+          if command -v google-chrome >/dev/null 2>&1; then
+            google-chrome --version
+          elif command -v google-chrome-stable >/dev/null 2>&1; then
+            google-chrome-stable --version
+          elif command -v chromium-browser >/dev/null 2>&1; then
+            chromium-browser --version
+          elif command -v chromium >/dev/null 2>&1; then
+            chromium --version
+          else
+            echo "Chrome/Chromium is not available on this runner." >&2
+            exit 1
+          fi
 
       - name: Install dependencies
         run: |
