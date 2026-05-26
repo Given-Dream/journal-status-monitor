@@ -213,6 +213,40 @@ class ManuscriptStorage:
         identity_title = ManuscriptStorage._identity_title(title)
         return f"{source}:{identity_title or manuscript_id or title}"
 
+    @staticmethod
+    def _first_seen_old_status() -> str:
+        return "\u9996\u6b21\u8bb0\u5f55\uff08\u65e0\u5386\u53f2\u72b6\u6001\uff09"
+
+    @staticmethod
+    def _is_silent_first_seen_status(status: object) -> bool:
+        text = str(status or "").strip().lower()
+        if not text or text == "unknown":
+            return True
+        silent_keywords = getattr(
+            Config,
+            "FIRST_SEEN_SILENT_STATUS_KEYWORDS",
+            ["submitted", "submission", "draft", "incomplete"],
+        )
+        return any(keyword in text for keyword in silent_keywords)
+
+    @staticmethod
+    def _notify_on_first_seen(status: object) -> bool:
+        if not getattr(Config, "NOTIFY_ON_FIRST_SEEN", True):
+            return False
+        return not ManuscriptStorage._is_silent_first_seen_status(status)
+
+    @staticmethod
+    def _change_item(manuscript: Dict, title: str, old_status: object, new_status: str, changed_at: str) -> Dict:
+        return {
+            "id": manuscript.get("id", ""),
+            "title": title,
+            "source": manuscript.get("source", "Unknown"),
+            "old_status": old_status,
+            "new_status": new_status,
+            "changed_at": changed_at,
+            "url": manuscript.get("url", ""),
+        }
+
     def compare_and_update(self, new_manuscripts: List[Dict]) -> List[Dict]:
         old_data = self.load_manuscripts()
         updated_data = old_data.copy()
@@ -245,19 +279,22 @@ class ManuscriptStorage:
                 old_status = old_record.get("status")
                 if old_status != current_status:
                     changed.append(
-                        {
-                            "id": manuscript.get("id", ""),
-                            "title": title,
-                            "source": manuscript.get("source", "Unknown"),
-                            "old_status": old_status,
-                            "new_status": current_status,
-                            "changed_at": current_time,
-                            "url": manuscript.get("url", ""),
-                        }
+                        self._change_item(manuscript, title, old_status, current_status, current_time)
                     )
                     print(f"Status changed: {title}: {old_status} -> {current_status}")
             else:
                 print(f"New manuscript recorded: {title} ({current_status})")
+                if self._notify_on_first_seen(current_status):
+                    changed.append(
+                        self._change_item(
+                            manuscript,
+                            title,
+                            self._first_seen_old_status(),
+                            current_status,
+                            current_time,
+                        )
+                    )
+                    print(f"First-seen status notification queued: {title}: {current_status}")
 
             record = {
                 "id": manuscript.get("id", ""),
