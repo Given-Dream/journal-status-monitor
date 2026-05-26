@@ -3,12 +3,12 @@ name: Journal Status Monitor
 on:
   schedule:
     - cron: '17,27,37 0 * * *'
-    - cron: '17 3 * * *'
+    - cron: '17,27,37 3 * * *'
     - cron: '17,27,37 4 * * *'
-    - cron: '17 6 * * *'
-    - cron: '17 9 * * *'
-    - cron: '17 12 * * *'
-    - cron: '17 14 * * *'
+    - cron: '17,27,37 6 * * *'
+    - cron: '17,27,37 9 * * *'
+    - cron: '17,27,37 12 * * *'
+    - cron: '17,27,37 14 * * *'
   workflow_dispatch:
     inputs:
       mode:
