@@ -1,0 +1,24 @@
+{
+  "IEEE:adaptive robust control of a piezo-actuated xy-stage with payload": {
+    "archived": false,
+    "first_seen": "2026-05-26 12:55:25",
+    "id": "26-TIE-3091",
+    "last_checked": "2026-05-26 12:55:25",
+    "source": "IEEE",
+    "status": "Under Review",
+    "title": "Adaptive Robust Control of a Piezo-Actuated XY-Stage with Payload",
+    "url": "https://mc.manuscriptcentral.com/tie-ieee"
+  },
+  "IEEE:robust adaptive control of state-constrained hysteretic nonlinear systems via fuzzy pseudoinverse compensation: application to giant magnetostrictive actuators": {
+    "archive_reason": "terminal_status",
+    "archived": true,
+    "archived_at": "2026-05-26 12:55:25",
+    "first_seen": "2026-05-26 12:55:25",
+    "id": "2026",
+    "last_checked": "2026-05-26 12:55:25",
+    "source": "IEEE",
+    "status": "Accept (27-Mar-2026)",
+    "title": "Robust Adaptive Control of State-Constrained Hysteretic Nonlinear Systems via Fuzzy Pseudoinverse Compensation: Application to Giant Magnetostrictive Actuators",
+    "url": "https://mc.manuscriptcentral.com/tie-ieee"
+  }
+}
