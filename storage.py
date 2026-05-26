@@ -41,6 +41,42 @@ class ManuscriptStorage:
         os.replace(tmp_file, self.data_file)
         print(f"Saved manuscript data to {self.data_file}")
 
+    def _meta_file(self) -> str:
+        root, ext = os.path.splitext(self.data_file)
+        return f"{root}.meta{ext or '.json'}"
+
+    def load_meta(self) -> Dict:
+        meta_file = self._meta_file()
+        if not os.path.exists(meta_file):
+            return {}
+        try:
+            with open(meta_file, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            return data if isinstance(data, dict) else {}
+        except Exception as exc:
+            print(f"Failed to read meta file: {exc}")
+            return {}
+
+    def save_meta(self, meta: Dict) -> None:
+        meta_file = self._meta_file()
+        tmp_file = f"{meta_file}.tmp"
+        with open(tmp_file, "w", encoding="utf-8") as file:
+            json.dump(meta, file, ensure_ascii=False, indent=2, sort_keys=True)
+            file.write("\n")
+        os.replace(tmp_file, meta_file)
+        print(f"Saved monitor meta to {meta_file}")
+
+    def daily_report_already_sent(self, today: str | None = None) -> bool:
+        today = today or datetime.now().strftime("%Y-%m-%d")
+        return self.load_meta().get("last_daily_report_date") == today
+
+    def mark_daily_report_sent(self, today: str | None = None) -> None:
+        today = today or datetime.now().strftime("%Y-%m-%d")
+        meta = self.load_meta()
+        meta["last_daily_report_date"] = today
+        meta["last_daily_report_sent_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.save_meta(meta)
+
     @staticmethod
     def _status_score(value: object) -> int:
         text = str(value or "").lower()
