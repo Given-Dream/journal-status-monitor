@@ -1,0 +1,14 @@
+name = "journal-status-monitor-scheduler"
+main = "worker.js"
+compatibility_date = "2026-05-26"
+
+[vars]
+GITHUB_OWNER = "Xuecheng377"
+GITHUB_REPO = "journal-status-monitor"
+GITHUB_WORKFLOW = "monitor.yml"
+GITHUB_REF = "main"
+
+[triggers]
+crons = [
+  "17,27,37 0,3,4,6,9,12,14 * * *"
+]
