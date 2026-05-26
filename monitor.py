@@ -677,7 +677,13 @@ class JournalMonitor:
         current = self.storage.get_all_manuscripts(include_archived=Config.INCLUDE_ARCHIVED_IN_REPORT)
 
         if mode == "daily_report":
-            return 0 if self.notifier.send_daily_report(current) else 1
+            if self.storage.daily_report_already_sent():
+                print("Daily report already sent today; skipping duplicate fallback run.")
+                return 0
+            sent = self.notifier.send_daily_report(current)
+            if sent:
+                self.storage.mark_daily_report_sent()
+            return 0 if sent else 1
         if changed:
             return 0 if self.notifier.send_change_notification(changed) else 1
 
