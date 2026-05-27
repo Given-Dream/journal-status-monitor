@@ -1,14 +1,7 @@
 name: Journal Status Monitor
+run-name: Journal Status Monitor (${{ inputs.mode || 'manual' }} window=${{ inputs.window || 'manual' }})
 
 on:
-  schedule:
-    - cron: '17,27,37 0 * * *'
-    - cron: '17,27,37 3 * * *'
-    - cron: '17,27,37 4 * * *'
-    - cron: '17,27,37 6 * * *'
-    - cron: '17,27,37 9 * * *'
-    - cron: '17,27,37 12 * * *'
-    - cron: '17,27,37 14 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -20,6 +13,10 @@ on:
           - normal
           - test
           - daily_report
+      window:
+        description: Beijing trigger window, for fallback dedupe
+        required: false
+        default: manual
 
 concurrency:
   group: journal-status-monitor
@@ -80,13 +77,9 @@ jobs:
         id: mode
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event.schedule }}" = "17,27,37 0 * * *" ]; then
-            echo "mode=daily_report" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=normal" >> "$GITHUB_OUTPUT"
-          fi
+          echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
+          echo "window=${{ github.event.inputs.window }}" >> "$GITHUB_OUTPUT"
+          echo "Trigger window: ${{ github.event.inputs.window }}"
 
       - name: Run monitor
         env:
