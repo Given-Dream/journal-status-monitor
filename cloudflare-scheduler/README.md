@@ -8,15 +8,12 @@ Cloudflare cron 使用 UTC 时间。本项目 Worker 会换算成北京时间，
 
 | 北京时间 | 触发模式 |
 | --- | --- |
-| 08:17、08:27、08:37 | `daily_report` |
-| 11:17、11:27、11:37 | `normal` |
-| 12:17、12:27、12:37 | `normal` |
-| 14:17、14:27、14:37 | `normal` |
-| 17:17、17:27、17:37 | `normal` |
-| 20:17、20:27、20:37 | `normal` |
-| 22:17、22:27、22:37 | `normal` |
+| 08:17 | `daily_report` 主触发 |
+| 08:27、08:37 | `daily_report` 兜底唤醒，若 08:17 已触发则跳过 |
+| 11:17、12:17、14:17、17:17、20:17、22:17 | `normal` 主触发 |
+| 对应的 27、37 分 | `normal` 兜底唤醒，若同一小时窗口已触发则跳过 |
 
-项目本身已经有“当天日报只发一次”的逻辑，所以早上三次兜底不会重复发送日报。
+Worker 会查询最近的 GitHub workflow_dispatch 运行记录，同一北京时间小时窗口最多触发一次。也就是说 17 分是主要检查，27 分和 37 分只是防止 17 分漏触发的兜底，不会正常情况下再创建新的 Actions 运行。
 
 ## GitHub Token 权限
 
@@ -68,8 +65,7 @@ wrangler deploy
 
 也可以在 Cloudflare Dashboard 的 Worker 日志里查看：
 
-- `Triggered GitHub workflow_dispatch with mode=daily_report.`
-- `Triggered GitHub workflow_dispatch with mode=normal.`
+- `triggered GitHub workflow_dispatch with mode=daily_report, window=...`
+- `skipped GitHub workflow_dispatch with mode=normal, window=...`
 
 GitHub Actions 页面中，对应运行的 `event` 会显示为 `workflow_dispatch`。
-
