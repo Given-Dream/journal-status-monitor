@@ -168,7 +168,8 @@ jobs:
               print(f"Skip workflow cleanup: {exc}")
               raise SystemExit(0)
 
-          for run in runs[20:]:
+          keep_count = 1
+          for run in runs[keep_count:]:
               run_id = run.get("id")
               if not run_id:
                   continue
